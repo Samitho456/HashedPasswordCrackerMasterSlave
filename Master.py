@@ -8,7 +8,7 @@ serverSocket.bind(('', serverPort))
 serverSocket.listen(5)
 
 crackedPasswords = []
-chunkLock = threading.Lock() # Lock to synchronize access to currentChunk and crackedPasswords 
+chunkLock = threading.Lock() # Lock to synchronize access to shared cracking state
 
 def CreatePasswordDict(passwordList: list) -> dict:
     """Creates a dictionary from a list of 'username:hash' entries."""
@@ -25,6 +25,8 @@ with open("passwords.txt", "r") as file:
 
 # Create password dictionary from list
 passwordDict = CreatePasswordDict(passwordList)
+# Shared dictionary of users that still need cracking.
+remainingPasswordDict = dict(passwordDict)
 
 # Get the dictionary words
 with open("webster-dictionary.txt", "r") as file:
@@ -59,7 +61,8 @@ def handleClient(connectionSocket: socket):
                         currentChunk += 1
                         print(f"Sent chunk {currentChunk}/{len(WordList)} to {connectionSocket.getpeername()}")
             case "password":
-                connectionSocket.send(json.dumps(passwordDict).encode())
+                with chunkLock:
+                    connectionSocket.send(json.dumps(remainingPasswordDict).encode())
             case "done":
                 print(f"Client {connectionSocket.getpeername()} has finished cracking passwords.")
                 with chunkLock:
@@ -80,16 +83,10 @@ def handleClient(connectionSocket: socket):
                     password = f"{payload[1]}:{payload[2]}"
                     print("Client found password: " + password)
                     with chunkLock:
-                        crackedPasswords.append(password)
+                        if payload[1] in remainingPasswordDict:
+                            del remainingPasswordDict[payload[1]]
+                            crackedPasswords.append(password)
                 continue
-
-def createPasswordDictionary() -> dict:
-    passwordDictionary = {}
-    for i in range(len(passwordList)):
-        passwordDictionary[passwordList[i].split(":")[0]] = passwordList[i].split(":")[1]
-    return passwordDictionary
-
-passwordDictionary = createPasswordDictionary()
 
 while True:
     connectionSocket, addr = serverSocket.accept()

@@ -89,32 +89,36 @@ passwordDictionary = json.loads(passwordDictData)
 print("Password dictionary ready for cracking: " + str(list(passwordDictionary.keys())))
 
 
-while True:
-    print("Requesting chunk from server...")
+if not passwordDictionary:
+    print("All passwords already cracked. Not requesting any chunks.")
+    clientSocket.send("done".encode())
+else:
+    print("Requesting one chunk from server...")
     clientSocket.send("chunk".encode())
     recievedChunk = clientSocket.recv(100000).decode()
-    
+
     if recievedChunk == "NO_MORE_CHUNKS":
-        print("No more chunks available. Finishing.")
-        clientSocket.send("done".encode())
-        break
-    
-    try:
-        chunk = json.loads(recievedChunk)
-    except Exception as e:
-        print(f"Error parsing chunk: {e}")
-        continue
-    
-    # Try cracking passwords with the current chunk of words
-    for username in list(passwordDictionary.keys()):
-        crackedpassword = crackPassword(passwordDictionary[username])
-        if crackedpassword:
-            print("Password cracked for user " + username + ": " + crackedpassword)
-            clientSocket.send(json.dumps(["found", username, crackedpassword]).encode())
-            del passwordDictionary[username] # Remove cracked password from dictionary
-            break
-    
-    # Clear chunk
-    chunk = []
+        print("No chunks available. Finishing.")
+    else:
+        try:
+            chunk = json.loads(recievedChunk)
+        except Exception as e:
+            print(f"Error parsing chunk: {e}")
+            chunk = []
+
+        # Try cracking passwords with this single chunk of words
+        for username in list(passwordDictionary.keys()):
+            crackedpassword = crackPassword(passwordDictionary[username])
+            if crackedpassword:
+                print("Password cracked for user " + username + ": " + crackedpassword)
+                clientSocket.send(json.dumps(["found", username, crackedpassword]).encode())
+                del passwordDictionary[username] # Remove cracked password from dictionary
+                break
+
+        # Clear chunk after processing
+        chunk = []
+
+    print("Single chunk task finished. Sending done.")
+    clientSocket.send("done".encode())
 
 clientSocket.close()
