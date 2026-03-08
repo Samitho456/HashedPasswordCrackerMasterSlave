@@ -1,7 +1,7 @@
 import hashlib
 import base64
 from socket import *
-import ast
+import json
 
 # Client setup
 serverName = 'localhost'
@@ -9,11 +9,10 @@ serverPort = 12000
 clientSocket = socket(AF_INET, SOCK_STREAM)
 clientSocket.connect((serverName, serverPort))
 
-chunk = []
-passwordDictionary = {}
+chunk = [] # Current chunk of words received from server
+passwordDictionary = {} # Dictionary of username and password pairs received from server
 
-
-def crackPassword(password):
+def crackPassword(password: str) -> str:
     global chunk
     for word in chunk:
         print("Trying password: " + word)
@@ -64,59 +63,58 @@ def crackPassword(password):
                     return str(j) + word + str(i)
     return None
 
-def get_sha1_base64(input_string):
-    # 1. Convert string to bytes
+def get_sha1_base64(input_string: str) -> str:
+    """Takes an input string, computes its SHA-1 hash, and returns the hash encoded in Base64."""
+    
     data = input_string.encode('utf-8')
     
-    # 2. Get the SHA-1 hash (raw bytes, not hex)
     sha1_bytes = hashlib.sha1(data).digest()
     
-    # 3. Encode those bytes to Base64
     base64_hash = base64.b64encode(sha1_bytes).decode('utf-8')
     
     return base64_hash
 
-def reverse(sentence):
+def reverse(sentence: str) -> str:
+    """Takes a string as input and returns the string reversed."""
     return sentence[::-1]
 
-first = True
+# Get password dictionary first
+print("Requesting password dictionary from server...")
+clientSocket.send("password".encode())
+print("Receiving password dictionary from server...")
+passwordDictData = clientSocket.recv(100000).decode()
+print("Password dictionary received from server: " + passwordDictData)
+
+passwordDictionary = json.loads(passwordDictData)
+print("Password dictionary ready for cracking: " + str(list(passwordDictionary.keys())))
 
 
-# input and send data
 while True:
-    # receive and print modified data
-    if(chunk == []):
-        print("Requesting chunk from server...")
-        clientSocket.send("chunk".encode())
-        print("Receiving chunk from server...")
-        recievedChunk = clientSocket.recv(100000).decode()
-        try:
-            chunk = ast.literal_eval(recievedChunk)
-        except Exception as e:
-            print(f"Error parsing chunk: {e}")
-            continue
-        continue
+    print("Requesting chunk from server...")
+    clientSocket.send("chunk".encode())
+    recievedChunk = clientSocket.recv(100000).decode()
     
-    elif(passwordDictionary == {}):
-        print("Requesting password list from server...")
-        clientSocket.send("password".encode())
-        print("Receiving password list from server...")
-        passwordList = clientSocket.recv(100000).decode()
-        print("Password list received from server: " + passwordList)
-        
-        passwordList = ast.literal_eval(passwordList)
-        print("Password list converted to list: " + str(passwordList))
-        for i in range(len(passwordList)):
-            passwordDictionary[passwordList[i].split(":")[0]] = passwordList[i].split(":")[1]
-            passwordList[i] = passwordList[i].split(":")[1]
-        continue
-        
-    if(chunk != [] and passwordDictionary != {}):
-        print("Cracking password...")
-        for username in passwordDictionary:
-            crackedpassword = crackPassword(passwordDictionary[username])
-            if crackedpassword:
-                print("Password cracked for user " + username + ": " + crackedpassword)
-                clientSocket.send(("found:" + username + ":" + crackedpassword).encode())
+    if recievedChunk == "NO_MORE_CHUNKS":
+        print("No more chunks available. Finishing.")
         clientSocket.send("done".encode())
         break
+    
+    try:
+        chunk = json.loads(recievedChunk)
+    except Exception as e:
+        print(f"Error parsing chunk: {e}")
+        continue
+    
+    # Try cracking passwords with the current chunk of words
+    for username in list(passwordDictionary.keys()):
+        crackedpassword = crackPassword(passwordDictionary[username])
+        if crackedpassword:
+            print("Password cracked for user " + username + ": " + crackedpassword)
+            clientSocket.send(json.dumps(["found", username, crackedpassword]).encode())
+            del passwordDictionary[username] # Remove cracked password from dictionary
+            break
+    
+    # Clear chunk
+    chunk = []
+
+clientSocket.close()
